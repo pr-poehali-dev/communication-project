@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import Icon from "@/components/ui/icon";
 
 const contacts = [
@@ -36,6 +36,35 @@ const initialMessages: Record<number, Array<{ id: number; text: string; out: boo
 
 type ViewType = "chat" | "video";
 
+type Notification = { id: number; contactId: number; name: string; text: string; avatar: string; color: string };
+
+const playSound = (type: "send" | "receive") => {
+  try {
+    const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    if (type === "send") {
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(1100, ctx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.12);
+    } else {
+      osc.frequency.setValueAtTime(660, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.1);
+      gain.gain.setValueAtTime(0.07, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.15);
+    }
+  } catch (_e) {
+    void _e;
+  }
+};
+
 export default function Index() {
   const [activeContact, setActiveContact] = useState(contacts[0]);
   const [messages, setMessages] = useState(initialMessages);
@@ -46,8 +75,14 @@ export default function Index() {
   const [callDuration, setCallDuration] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [search, setSearch] = useState("");
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadCounts, setUnreadCounts] = useState<Record<number, number>>(() =>
+    Object.fromEntries(contacts.map((c) => [c.id, c.unread]))
+  );
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const notifTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const notifIdRef = useRef(100);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -63,6 +98,34 @@ export default function Index() {
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [view]);
 
+  const incomingTexts = [
+    "Окей, понял!", "Спасибо!", "Хорошо, договорились 👍", "Жду ответа", "Отлично!",
+    "Можешь позвонить?", "Смотри что нашёл 🔥", "Всё сделано", "Когда будешь?", "Ок 👌"
+  ];
+
+  const pushNotification = useCallback((contact: typeof contacts[0], text: string) => {
+    const nid = ++notifIdRef.current;
+    setNotifications((prev) => [...prev.slice(-2), { id: nid, contactId: contact.id, name: contact.name, text, avatar: contact.avatar, color: contact.color }]);
+    playSound("receive");
+    setUnreadCounts((prev) => ({ ...prev, [contact.id]: (prev[contact.id] || 0) + 1 }));
+    setMessages((prev) => ({
+      ...prev,
+      [contact.id]: [...(prev[contact.id] || []), { id: nid, text, out: false, time: new Date().toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }) }],
+    }));
+    setTimeout(() => setNotifications((prev) => prev.filter((n) => n.id !== nid)), 4000);
+  }, []);
+
+  useEffect(() => {
+    notifTimerRef.current = setInterval(() => {
+      const others = contacts.filter((c) => c.id !== activeContact.id && c.status !== "offline");
+      if (others.length === 0) return;
+      const c = others[Math.floor(Math.random() * others.length)];
+      const text = incomingTexts[Math.floor(Math.random() * incomingTexts.length)];
+      pushNotification(c, text);
+    }, 12000);
+    return () => { if (notifTimerRef.current) clearInterval(notifTimerRef.current); };
+  }, [activeContact, pushNotification]);
+
   const formatDuration = (s: number) => {
     const m = Math.floor(s / 60).toString().padStart(2, "0");
     const sec = (s % 60).toString().padStart(2, "0");
@@ -74,6 +137,7 @@ export default function Index() {
     const newMsg = { id: Date.now(), text: inputText.trim(), out: true, time: new Date().toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }) };
     setMessages((prev) => ({ ...prev, [activeContact.id]: [...(prev[activeContact.id] || []), newMsg] }));
     setInputText("");
+    playSound("send");
   };
 
   const filtered = contacts.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()));
@@ -92,6 +156,30 @@ export default function Index() {
 
   return (
     <div className="bg-mesh min-h-screen flex items-center justify-center p-2 md:p-4">
+      {/* Notifications */}
+      <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
+        {notifications.map((n) => (
+          <div
+            key={n.id}
+            className="pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-2xl glass-dark border border-white/10 shadow-2xl animate-slide-up cursor-pointer min-w-[260px]"
+            onClick={() => {
+              const c = contacts.find((cc) => cc.id === n.contactId);
+              if (c) { setActiveContact(c); setUnreadCounts((prev) => ({ ...prev, [c.id]: 0 })); }
+              setNotifications((prev) => prev.filter((x) => x.id !== n.id));
+            }}
+          >
+            <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${n.color} flex items-center justify-center text-xs font-bold text-white flex-shrink-0`}>
+              {n.avatar}
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs font-semibold text-white/80">{n.name}</div>
+              <div className="text-xs text-white/50 truncate">{n.text}</div>
+            </div>
+            <div className="w-2 h-2 rounded-full bg-violet-400 flex-shrink-0 ml-auto" />
+          </div>
+        ))}
+      </div>
+
       <div className="w-full max-w-6xl h-[92vh] flex rounded-2xl overflow-hidden glass border border-white/[0.07] shadow-2xl animate-scale-in">
 
         {/* Sidebar */}
@@ -125,7 +213,7 @@ export default function Index() {
             {filtered.map((c) => (
               <button
                 key={c.id}
-                onClick={() => setActiveContact(c)}
+                onClick={() => { setActiveContact(c); setUnreadCounts((prev) => ({ ...prev, [c.id]: 0 })); }}
                 className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-150 text-left group
                   ${activeContact.id === c.id ? "bg-white/[0.08] shadow-sm" : "hover:bg-white/[0.04]"}`}
               >
@@ -142,9 +230,9 @@ export default function Index() {
                   </div>
                   <span className="text-xs text-white/40 truncate block">{c.lastMsg}</span>
                 </div>
-                {c.unread > 0 && (
+                {(unreadCounts[c.id] || 0) > 0 && (
                   <span className="w-5 h-5 rounded-full bg-violet-500 text-white text-[11px] font-bold flex items-center justify-center flex-shrink-0">
-                    {c.unread}
+                    {unreadCounts[c.id]}
                   </span>
                 )}
               </button>
