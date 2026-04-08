@@ -109,6 +109,9 @@ export default function Index() {
     Object.fromEntries(contacts.map((c) => [c.id, c.unread]))
   );
   const [isTyping, setIsTyping] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState<{ msgId: number; x: number; y: number } | null>(null);
+  const [copyToast, setCopyToast] = useState(false);
+  const [forwardContact, setForwardContact] = useState<typeof contacts[0] | null>(null);
   const [msgSearch, setMsgSearch] = useState("");
   const [msgSearchOpen, setMsgSearchOpen] = useState(false);
   const [msgSearchIdx, setMsgSearchIdx] = useState(0);
@@ -250,6 +253,61 @@ export default function Index() {
     setMsgSearchIdx((prev) => (prev + dir + msgMatches.length) % msgMatches.length);
   };
 
+  const openCtxMenu = (e: React.MouseEvent, msgId: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({ msgId, x: e.clientX, y: e.clientY });
+    setReactionPickerMsgId(null);
+  };
+
+  const closeCtxMenu = () => setCtxMenu(null);
+
+  const copyMsg = () => {
+    if (!ctxMenu) return;
+    const msg = currentMsgs.find((m) => m.id === ctxMenu.msgId);
+    if (!msg) return;
+    navigator.clipboard.writeText(msg.text).catch(() => {});
+    setCopyToast(true);
+    setTimeout(() => setCopyToast(false), 2000);
+    closeCtxMenu();
+  };
+
+  const deleteMsg = () => {
+    if (!ctxMenu) return;
+    const mid = ctxMenu.msgId;
+    setMessages((prev) => ({
+      ...prev,
+      [activeContact.id]: (prev[activeContact.id] || []).filter((m) => m.id !== mid),
+    }));
+    closeCtxMenu();
+  };
+
+  const forwardMsg = (target: typeof contacts[0]) => {
+    if (!ctxMenu) return;
+    const msg = currentMsgs.find((m) => m.id === ctxMenu.msgId);
+    if (!msg) return;
+    const fwdId = Date.now();
+    setMessages((prev) => ({
+      ...prev,
+      [target.id]: [...(prev[target.id] || []), { id: fwdId, text: `↪ ${msg.text}`, out: true, time: new Date().toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }), status: "sending" }],
+    }));
+    setTimeout(() => updateMsgStatus(fwdId, target.id, "sent"), 400);
+    setTimeout(() => updateMsgStatus(fwdId, target.id, "delivered"), 1200);
+    if (target.status === "online") setTimeout(() => updateMsgStatus(fwdId, target.id, "read"), 2800);
+    setForwardContact(null);
+    closeCtxMenu();
+    playSound("send");
+  };
+
+  const replyMsg = () => {
+    if (!ctxMenu) return;
+    const msg = currentMsgs.find((m) => m.id === ctxMenu.msgId);
+    if (!msg) return;
+    setInputText(`↩ «${msg.text.slice(0, 40)}${msg.text.length > 40 ? "…" : ""}»\n`);
+    closeCtxMenu();
+    setTimeout(() => document.querySelector<HTMLInputElement>(".msg-input")?.focus(), 50);
+  };
+
   const addReaction = (msgId: number, emoji: string) => {
     setMessages((prev) => ({
       ...prev,
@@ -279,7 +337,61 @@ export default function Index() {
   };
 
   return (
-    <div className="bg-mesh min-h-screen flex items-center justify-center p-2 md:p-4">
+    <div className="bg-mesh min-h-screen flex items-center justify-center p-2 md:p-4" onClick={closeCtxMenu}>
+      {/* Copy toast */}
+      {copyToast && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[60] px-4 py-2 rounded-xl glass-dark border border-white/10 text-sm text-white/80 animate-fade-in shadow-xl flex items-center gap-2">
+          <Icon name="Check" size={14} className="text-emerald-400" />
+          Скопировано
+        </div>
+      )}
+
+      {/* Context menu */}
+      {ctxMenu && (
+        <div
+          className="fixed z-[60] glass-dark border border-white/10 rounded-2xl shadow-2xl py-1.5 min-w-[180px] animate-scale-in"
+          style={{ left: Math.min(ctxMenu.x, window.innerWidth - 200), top: Math.min(ctxMenu.y, window.innerHeight - 220) }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button onClick={replyMsg} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white transition-colors">
+            <Icon name="CornerUpLeft" size={15} className="text-violet-400" />
+            Ответить
+          </button>
+          <button onClick={copyMsg} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white transition-colors">
+            <Icon name="Copy" size={15} className="text-cyan-400" />
+            Копировать
+          </button>
+          <button
+            onClick={() => setForwardContact(forwardContact ? null : contacts[0])}
+            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white transition-colors"
+          >
+            <Icon name="Forward" size={15} className="text-emerald-400" />
+            Переслать
+          </button>
+          {forwardContact !== null && (
+            <div className="border-t border-white/[0.06] pt-1 mt-1">
+              <p className="px-4 py-1 text-[11px] text-white/30 uppercase tracking-wider">Переслать кому</p>
+              {contacts.filter((c) => c.id !== activeContact.id).map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => forwardMsg(c)}
+                  className="w-full flex items-center gap-2.5 px-4 py-2 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white transition-colors"
+                >
+                  <div className={`w-5 h-5 rounded-full bg-gradient-to-br ${c.color} flex items-center justify-center text-[9px] font-bold text-white`}>{c.avatar[0]}</div>
+                  {c.name.split(" ")[0]}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="border-t border-white/[0.06] mt-1 pt-1">
+            <button onClick={deleteMsg} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-400/80 hover:bg-red-500/10 hover:text-red-400 transition-colors">
+              <Icon name="Trash2" size={15} />
+              Удалить
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Notifications */}
       <div className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
         {notifications.map((n) => (
@@ -581,7 +693,10 @@ export default function Index() {
                         </div>
                       )}
 
-                      <div className={`px-4 py-2.5 transition-all duration-300 ${msg.out ? "msg-bubble-out" : "msg-bubble-in"} ${isActiveMatch ? "ring-2 ring-violet-400/70 ring-offset-1 ring-offset-transparent" : isMatch ? "ring-1 ring-amber-400/40" : ""}`}>
+                      <div
+                        onContextMenu={(e) => openCtxMenu(e, msg.id)}
+                        className={`px-4 py-2.5 transition-all duration-300 cursor-context-menu ${msg.out ? "msg-bubble-out" : "msg-bubble-in"} ${isActiveMatch ? "ring-2 ring-violet-400/70 ring-offset-1 ring-offset-transparent" : isMatch ? "ring-1 ring-amber-400/40" : ""}`}
+                      >
                         <p className="text-sm text-white/90 leading-relaxed">
                           {isMatch
                             ? (() => {
@@ -648,7 +763,7 @@ export default function Index() {
                     onChange={(e) => setInputText(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendMessage()}
                     placeholder={`Написать ${activeContact.name.split(" ")[0]}...`}
-                    className="flex-1 bg-transparent text-sm text-white/85 placeholder-white/25 outline-none"
+                    className="msg-input flex-1 bg-transparent text-sm text-white/85 placeholder-white/25 outline-none"
                   />
                   <button className="p-1 text-white/30 hover:text-white/60 transition-colors">
                     <Icon name="Paperclip" size={18} />
