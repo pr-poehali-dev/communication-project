@@ -10,27 +10,50 @@ const contacts = [
   { id: 6, name: "Игорь Стальной", avatar: "ИС", status: "online", lastMsg: "Отправил отчёт", time: "Пн", unread: 0, color: "from-indigo-500 to-violet-500" },
 ];
 
-type Msg = { id: number; text: string; out: boolean; time: string; reactions?: Record<string, number> };
+type MsgStatus = "sending" | "sent" | "delivered" | "read";
+type Msg = { id: number; text: string; out: boolean; time: string; reactions?: Record<string, number>; status?: MsgStatus };
 
 const REACTION_EMOJIS = ["❤️", "😂", "🔥", "👍", "😮", "😢"];
+
+function MsgTick({ status }: { status?: MsgStatus }) {
+  if (!status) return null;
+  if (status === "sending") return <span className="text-white/30 text-[11px]">⏳</span>;
+  if (status === "sent") return (
+    <svg width="14" height="10" viewBox="0 0 14 10" className="inline text-white/40" fill="none">
+      <path d="M1 5l3 3 5-7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+  if (status === "delivered") return (
+    <svg width="18" height="10" viewBox="0 0 18 10" className="inline text-white/40" fill="none">
+      <path d="M1 5l3 3 5-7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M6 5l3 3 5-7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+  return (
+    <svg width="18" height="10" viewBox="0 0 18 10" className="inline text-cyan-400" fill="none">
+      <path d="M1 5l3 3 5-7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+      <path d="M6 5l3 3 5-7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
 
 const initialMessages: Record<number, Array<Msg>> = {
   1: [
     { id: 1, text: "Привет! Как дела?", out: false, time: "14:10" },
-    { id: 2, text: "Отлично! Работаю над проектом", out: true, time: "14:12" },
+    { id: 2, text: "Отлично! Работаю над проектом", out: true, time: "14:12", status: "read" },
     { id: 3, text: "Классно, ты уже близко к финишу?", out: false, time: "14:20" },
-    { id: 4, text: "Да, ещё пару дней и готово 🎉", out: true, time: "14:25" },
+    { id: 4, text: "Да, ещё пару дней и готово 🎉", out: true, time: "14:25", status: "read" },
     { id: 5, text: "Увидимся завтра!", out: false, time: "14:32" },
   ],
   2: [
     { id: 1, text: "Посмотри файл 👀", out: false, time: "13:15" },
   ],
   3: [
-    { id: 1, text: "Встретимся в 15:00?", out: true, time: "10:55" },
+    { id: 1, text: "Встретимся в 15:00?", out: true, time: "10:55", status: "read" },
     { id: 2, text: "Хорошо, договорились", out: false, time: "11:02" },
   ],
   4: [
-    { id: 1, text: "Ребята, готов к тестированию?", out: true, time: "10:00" },
+    { id: 1, text: "Ребята, готов к тестированию?", out: true, time: "10:00", status: "read" },
     { id: 2, text: "Да, всё норм!", out: false, time: "10:15" },
     { id: 3, text: "Деплой прошёл успешно 🚀", out: false, time: "Вчера" },
   ],
@@ -164,14 +187,27 @@ export default function Index() {
     return `${m}:${sec}`;
   };
 
+  const updateMsgStatus = (msgId: number, contactId: number, status: MsgStatus) => {
+    setMessages((prev) => ({
+      ...prev,
+      [contactId]: (prev[contactId] || []).map((m) => m.id === msgId ? { ...m, status } : m),
+    }));
+  };
+
   const sendMessage = () => {
     if (!inputText.trim()) return;
-    const newMsg = { id: Date.now(), text: inputText.trim(), out: true, time: new Date().toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }) };
-    setMessages((prev) => ({ ...prev, [activeContact.id]: [...(prev[activeContact.id] || []), newMsg] }));
+    const msgId = Date.now();
+    const cid = activeContact.id;
+    const newMsg: Msg = { id: msgId, text: inputText.trim(), out: true, time: new Date().toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }), status: "sending" };
+    setMessages((prev) => ({ ...prev, [cid]: [...(prev[cid] || []), newMsg] }));
     setInputText("");
     playSound("send");
-    // активный контакт «отвечает» — показываем typing
     triggerTyping();
+    setTimeout(() => updateMsgStatus(msgId, cid, "sent"), 400);
+    setTimeout(() => updateMsgStatus(msgId, cid, "delivered"), 1200);
+    if (activeContact.status === "online") {
+      setTimeout(() => updateMsgStatus(msgId, cid, "read"), 2800 + Math.random() * 1500);
+    }
   };
 
   const addReaction = (msgId: number, emoji: string) => {
@@ -460,7 +496,10 @@ export default function Index() {
 
                       <div className={`px-4 py-2.5 ${msg.out ? "msg-bubble-out" : "msg-bubble-in"}`}>
                         <p className="text-sm text-white/90 leading-relaxed">{msg.text}</p>
-                        <p className={`text-[11px] mt-1 ${msg.out ? "text-white/50 text-right" : "text-white/30"}`}>{msg.time}</p>
+                        <p className={`text-[11px] mt-1 flex items-center gap-1 ${msg.out ? "text-white/50 justify-end" : "text-white/30"}`}>
+                          {msg.time}
+                          {msg.out && <MsgTick status={msg.status} />}
+                        </p>
                       </div>
 
                       {/* Reactions display */}
