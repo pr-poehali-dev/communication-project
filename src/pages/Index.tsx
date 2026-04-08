@@ -10,7 +10,11 @@ const contacts = [
   { id: 6, name: "Игорь Стальной", avatar: "ИС", status: "online", lastMsg: "Отправил отчёт", time: "Пн", unread: 0, color: "from-indigo-500 to-violet-500" },
 ];
 
-const initialMessages: Record<number, Array<{ id: number; text: string; out: boolean; time: string }>> = {
+type Msg = { id: number; text: string; out: boolean; time: string; reactions?: Record<string, number> };
+
+const REACTION_EMOJIS = ["❤️", "😂", "🔥", "👍", "😮", "😢"];
+
+const initialMessages: Record<number, Array<Msg>> = {
   1: [
     { id: 1, text: "Привет! Как дела?", out: false, time: "14:10" },
     { id: 2, text: "Отлично! Работаю над проектом", out: true, time: "14:12" },
@@ -67,7 +71,9 @@ const playSound = (type: "send" | "receive") => {
 
 export default function Index() {
   const [activeContact, setActiveContact] = useState(contacts[0]);
-  const [messages, setMessages] = useState(initialMessages);
+  const [messages, setMessages] = useState<Record<number, Msg[]>>(initialMessages);
+  const [hoveredMsgId, setHoveredMsgId] = useState<number | null>(null);
+  const [reactionPickerMsgId, setReactionPickerMsgId] = useState<number | null>(null);
   const [inputText, setInputText] = useState("");
   const [view, setView] = useState<ViewType>("chat");
   const [micOn, setMicOn] = useState(true);
@@ -137,6 +143,20 @@ export default function Index() {
     const newMsg = { id: Date.now(), text: inputText.trim(), out: true, time: new Date().toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }) };
     setMessages((prev) => ({ ...prev, [activeContact.id]: [...(prev[activeContact.id] || []), newMsg] }));
     setInputText("");
+    playSound("send");
+  };
+
+  const addReaction = (msgId: number, emoji: string) => {
+    setMessages((prev) => ({
+      ...prev,
+      [activeContact.id]: (prev[activeContact.id] || []).map((m) => {
+        if (m.id !== msgId) return m;
+        const reactions = { ...(m.reactions || {}) };
+        reactions[emoji] = (reactions[emoji] || 0) + 1;
+        return { ...m, reactions };
+      }),
+    }));
+    setReactionPickerMsgId(null);
     playSound("send");
   };
 
@@ -348,21 +368,75 @@ export default function Index() {
           {/* Chat */}
           {view === "chat" && (
             <>
-              <div className="flex-1 overflow-y-auto scrollbar-hide px-5 py-4 space-y-2">
+              <div
+                className="flex-1 overflow-y-auto scrollbar-hide px-5 py-4 space-y-2"
+                onClick={() => setReactionPickerMsgId(null)}
+              >
                 {currentMsgs.map((msg, i) => (
                   <div
                     key={msg.id}
-                    className={`flex ${msg.out ? "justify-end" : "justify-start"} animate-fade-in`}
+                    className={`flex ${msg.out ? "justify-end" : "justify-start"} animate-fade-in group/msg`}
                     style={{ animationDelay: `${i * 30}ms` }}
+                    onMouseEnter={() => setHoveredMsgId(msg.id)}
+                    onMouseLeave={() => setHoveredMsgId(null)}
                   >
                     {!msg.out && (
                       <div className={`w-6 h-6 rounded-full bg-gradient-to-br ${activeContact.color} flex items-center justify-center text-[10px] font-bold text-white mr-2 mt-auto flex-shrink-0`}>
                         {activeContact.avatar[0]}
                       </div>
                     )}
-                    <div className={`max-w-[70%] px-4 py-2.5 ${msg.out ? "msg-bubble-out" : "msg-bubble-in"}`}>
-                      <p className="text-sm text-white/90 leading-relaxed">{msg.text}</p>
-                      <p className={`text-[11px] mt-1 ${msg.out ? "text-white/50 text-right" : "text-white/30"}`}>{msg.time}</p>
+
+                    <div className="relative max-w-[70%]">
+                      {/* Reaction picker trigger */}
+                      {hoveredMsgId === msg.id && (
+                        <button
+                          className={`absolute top-1/2 -translate-y-1/2 z-10 w-6 h-6 rounded-full glass border border-white/10 text-white/50 hover:text-white/90 flex items-center justify-center transition-all animate-scale-in
+                            ${msg.out ? "-left-8" : "-right-8"}`}
+                          onClick={(e) => { e.stopPropagation(); setReactionPickerMsgId(reactionPickerMsgId === msg.id ? null : msg.id); }}
+                        >
+                          <span className="text-[11px]">😊</span>
+                        </button>
+                      )}
+
+                      {/* Reaction picker */}
+                      {reactionPickerMsgId === msg.id && (
+                        <div
+                          className={`absolute bottom-full mb-2 z-20 flex gap-1 p-1.5 rounded-2xl glass-dark border border-white/10 shadow-xl animate-scale-in
+                            ${msg.out ? "right-0" : "left-0"}`}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {REACTION_EMOJIS.map((emoji) => (
+                            <button
+                              key={emoji}
+                              onClick={() => addReaction(msg.id, emoji)}
+                              className="w-8 h-8 rounded-xl hover:bg-white/10 flex items-center justify-center text-lg transition-all hover:scale-125"
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className={`px-4 py-2.5 ${msg.out ? "msg-bubble-out" : "msg-bubble-in"}`}>
+                        <p className="text-sm text-white/90 leading-relaxed">{msg.text}</p>
+                        <p className={`text-[11px] mt-1 ${msg.out ? "text-white/50 text-right" : "text-white/30"}`}>{msg.time}</p>
+                      </div>
+
+                      {/* Reactions display */}
+                      {msg.reactions && Object.keys(msg.reactions).length > 0 && (
+                        <div className={`flex flex-wrap gap-1 mt-1 ${msg.out ? "justify-end" : "justify-start"}`}>
+                          {Object.entries(msg.reactions).map(([emoji, count]) => (
+                            <button
+                              key={emoji}
+                              onClick={() => addReaction(msg.id, emoji)}
+                              className="flex items-center gap-0.5 px-2 py-0.5 rounded-full glass border border-white/10 text-xs hover:border-violet-500/40 transition-all hover:scale-105"
+                            >
+                              <span>{emoji}</span>
+                              {count > 1 && <span className="text-white/60 text-[11px]">{count}</span>}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))}
