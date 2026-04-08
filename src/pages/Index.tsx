@@ -109,6 +109,11 @@ export default function Index() {
     Object.fromEntries(contacts.map((c) => [c.id, c.unread]))
   );
   const [isTyping, setIsTyping] = useState(false);
+  const [msgSearch, setMsgSearch] = useState("");
+  const [msgSearchOpen, setMsgSearchOpen] = useState(false);
+  const [msgSearchIdx, setMsgSearchIdx] = useState(0);
+  const msgSearchRef = useRef<HTMLInputElement>(null);
+  const msgRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const notifTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -208,6 +213,41 @@ export default function Index() {
     if (activeContact.status === "online") {
       setTimeout(() => updateMsgStatus(msgId, cid, "read"), 2800 + Math.random() * 1500);
     }
+  };
+
+  // Поиск по сообщениям
+  const msgMatches = msgSearch.trim()
+    ? currentMsgs.reduce<number[]>((acc, m, i) => {
+        if (m.text.toLowerCase().includes(msgSearch.toLowerCase())) acc.push(i);
+        return acc;
+      }, [])
+    : [];
+
+  const openMsgSearch = () => {
+    setMsgSearchOpen(true);
+    setMsgSearch("");
+    setMsgSearchIdx(0);
+    setTimeout(() => msgSearchRef.current?.focus(), 50);
+  };
+
+  const closeMsgSearch = () => {
+    setMsgSearchOpen(false);
+    setMsgSearch("");
+    setMsgSearchIdx(0);
+  };
+
+  useEffect(() => {
+    if (msgMatches.length === 0) return;
+    const idx = msgMatches[msgSearchIdx] ?? msgMatches[0];
+    const msg = currentMsgs[idx];
+    if (msg && msgRefs.current[msg.id]) {
+      msgRefs.current[msg.id]?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [msgSearchIdx, msgSearch]);
+
+  const stepSearch = (dir: 1 | -1) => {
+    if (msgMatches.length === 0) return;
+    setMsgSearchIdx((prev) => (prev + dir + msgMatches.length) % msgMatches.length);
   };
 
   const addReaction = (msgId: number, emoji: string) => {
@@ -380,11 +420,53 @@ export default function Index() {
               <button className="p-2 rounded-lg hover:bg-white/[0.06] transition-colors text-white/40 hover:text-white/70">
                 <Icon name="Phone" size={16} />
               </button>
+              <button
+                onClick={openMsgSearch}
+                className={`p-2 rounded-lg transition-colors ${msgSearchOpen ? "bg-violet-500/20 text-violet-300" : "hover:bg-white/[0.06] text-white/40 hover:text-white/70"}`}
+              >
+                <Icon name="Search" size={16} />
+              </button>
               <button className="p-2 rounded-lg hover:bg-white/[0.06] transition-colors text-white/40 hover:text-white/70">
                 <Icon name="MoreVertical" size={16} />
               </button>
             </div>
           </div>
+
+          {/* Message search bar */}
+          {msgSearchOpen && (
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-white/[0.06] animate-fade-in" style={{ background: "rgba(0,0,0,0.2)" }}>
+              <Icon name="Search" size={14} className="text-white/30 flex-shrink-0" />
+              <input
+                ref={msgSearchRef}
+                value={msgSearch}
+                onChange={(e) => { setMsgSearch(e.target.value); setMsgSearchIdx(0); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") stepSearch(e.shiftKey ? -1 : 1);
+                  if (e.key === "Escape") closeMsgSearch();
+                }}
+                placeholder="Поиск в переписке..."
+                className="flex-1 bg-transparent text-sm text-white/80 placeholder-white/25 outline-none"
+              />
+              {msgSearch && (
+                <span className="text-xs text-white/30 flex-shrink-0">
+                  {msgMatches.length > 0 ? `${msgSearchIdx + 1} / ${msgMatches.length}` : "0 результатов"}
+                </span>
+              )}
+              {msgMatches.length > 1 && (
+                <>
+                  <button onClick={() => stepSearch(-1)} className="p-1 rounded hover:bg-white/10 text-white/40 hover:text-white/70 transition-colors">
+                    <Icon name="ChevronUp" size={14} />
+                  </button>
+                  <button onClick={() => stepSearch(1)} className="p-1 rounded hover:bg-white/10 text-white/40 hover:text-white/70 transition-colors">
+                    <Icon name="ChevronDown" size={14} />
+                  </button>
+                </>
+              )}
+              <button onClick={closeMsgSearch} className="p-1 rounded hover:bg-white/10 text-white/40 hover:text-white/70 transition-colors">
+                <Icon name="X" size={14} />
+              </button>
+            </div>
+          )}
 
           {/* Video call */}
           {view === "video" && (
@@ -449,10 +531,15 @@ export default function Index() {
                 className="flex-1 overflow-y-auto scrollbar-hide px-5 py-4 space-y-2"
                 onClick={() => setReactionPickerMsgId(null)}
               >
-                {currentMsgs.map((msg, i) => (
+                {currentMsgs.map((msg, i) => {
+                  const isMatch = msgSearch.trim() && msg.text.toLowerCase().includes(msgSearch.toLowerCase());
+                  const matchPos = msgMatches.indexOf(i);
+                  const isActiveMatch = isMatch && matchPos === msgSearchIdx;
+                  return (
                   <div
                     key={msg.id}
-                    className={`flex ${msg.out ? "justify-end" : "justify-start"} animate-fade-in group/msg`}
+                    ref={(el) => { msgRefs.current[msg.id] = el; }}
+                    className={`flex ${msg.out ? "justify-end" : "justify-start"} animate-fade-in group/msg transition-all duration-200`}
                     style={{ animationDelay: `${i * 30}ms` }}
                     onMouseEnter={() => setHoveredMsgId(msg.id)}
                     onMouseLeave={() => setHoveredMsgId(null)}
@@ -494,8 +581,21 @@ export default function Index() {
                         </div>
                       )}
 
-                      <div className={`px-4 py-2.5 ${msg.out ? "msg-bubble-out" : "msg-bubble-in"}`}>
-                        <p className="text-sm text-white/90 leading-relaxed">{msg.text}</p>
+                      <div className={`px-4 py-2.5 transition-all duration-300 ${msg.out ? "msg-bubble-out" : "msg-bubble-in"} ${isActiveMatch ? "ring-2 ring-violet-400/70 ring-offset-1 ring-offset-transparent" : isMatch ? "ring-1 ring-amber-400/40" : ""}`}>
+                        <p className="text-sm text-white/90 leading-relaxed">
+                          {isMatch
+                            ? (() => {
+                                const q = msgSearch.toLowerCase();
+                                const parts = msg.text.split(new RegExp(`(${msgSearch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi"));
+                                return parts.map((p, pi) =>
+                                  p.toLowerCase() === q
+                                    ? <mark key={pi} className={`rounded px-0.5 ${isActiveMatch ? "bg-violet-400 text-white" : "bg-amber-400/50 text-white"}`}>{p}</mark>
+                                    : p
+                                );
+                              })()
+                            : msg.text
+                          }
+                        </p>
                         <p className={`text-[11px] mt-1 flex items-center gap-1 ${msg.out ? "text-white/50 justify-end" : "text-white/30"}`}>
                           {msg.time}
                           {msg.out && <MsgTick status={msg.status} />}
@@ -519,7 +619,8 @@ export default function Index() {
                       )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
                 {/* Typing indicator bubble */}
                 {isTyping && activeContact.status !== "offline" && (
                   <div className="flex justify-start items-end gap-2 animate-fade-in mt-1">
