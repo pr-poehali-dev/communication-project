@@ -112,6 +112,7 @@ export default function Index() {
   const [ctxMenu, setCtxMenu] = useState<{ msgId: number; x: number; y: number } | null>(null);
   const [copyToast, setCopyToast] = useState(false);
   const [forwardContact, setForwardContact] = useState<typeof contacts[0] | null>(null);
+  const [pinnedMsgs, setPinnedMsgs] = useState<Record<number, number | null>>({});
   const [msgSearch, setMsgSearch] = useState("");
   const [msgSearchOpen, setMsgSearchOpen] = useState(false);
   const [msgSearchIdx, setMsgSearchIdx] = useState(0);
@@ -299,6 +300,16 @@ export default function Index() {
     playSound("send");
   };
 
+  const pinMsg = () => {
+    if (!ctxMenu) return;
+    const cid = activeContact.id;
+    setPinnedMsgs((prev) => ({
+      ...prev,
+      [cid]: prev[cid] === ctxMenu.msgId ? null : ctxMenu.msgId,
+    }));
+    closeCtxMenu();
+  };
+
   const replyMsg = () => {
     if (!ctxMenu) return;
     const msg = currentMsgs.find((m) => m.id === ctxMenu.msgId);
@@ -360,6 +371,10 @@ export default function Index() {
           <button onClick={copyMsg} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white transition-colors">
             <Icon name="Copy" size={15} className="text-cyan-400" />
             Копировать
+          </button>
+          <button onClick={pinMsg} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-white/75 hover:bg-white/[0.06] hover:text-white transition-colors">
+            <Icon name="Pin" size={15} className="text-amber-400" />
+            {pinnedMsgs[activeContact.id] === ctxMenu?.msgId ? "Открепить" : "Закрепить"}
           </button>
           <button
             onClick={() => setForwardContact(forwardContact ? null : contacts[0])}
@@ -579,6 +594,38 @@ export default function Index() {
               </button>
             </div>
           )}
+
+          {/* Pinned message banner */}
+          {pinnedMsgs[activeContact.id] && (() => {
+            const pinned = currentMsgs.find((m) => m.id === pinnedMsgs[activeContact.id]);
+            if (!pinned) return null;
+            return (
+              <div
+                className="flex items-center gap-3 px-4 py-2 border-b border-white/[0.06] cursor-pointer hover:bg-white/[0.03] transition-colors animate-fade-in"
+                style={{ background: "rgba(139,92,246,0.07)" }}
+                onClick={() => {
+                  if (msgRefs.current[pinned.id]) {
+                    msgRefs.current[pinned.id]?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  }
+                }}
+              >
+                <div className="w-0.5 h-8 rounded-full bg-violet-400 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] text-violet-400 font-medium mb-0.5 flex items-center gap-1">
+                    <Icon name="Pin" size={11} />
+                    Закреплённое сообщение
+                  </p>
+                  <p className="text-xs text-white/55 truncate">{pinned.text}</p>
+                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setPinnedMsgs((prev) => ({ ...prev, [activeContact.id]: null })); }}
+                  className="p-1 rounded hover:bg-white/10 text-white/25 hover:text-white/60 transition-colors flex-shrink-0"
+                >
+                  <Icon name="X" size={13} />
+                </button>
+              </div>
+            );
+          })()}
 
           {/* Video call */}
           {view === "video" && (
