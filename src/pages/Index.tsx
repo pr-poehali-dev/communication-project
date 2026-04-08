@@ -85,9 +85,11 @@ export default function Index() {
   const [unreadCounts, setUnreadCounts] = useState<Record<number, number>>(() =>
     Object.fromEntries(contacts.map((c) => [c.id, c.unread]))
   );
+  const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const notifTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const notifIdRef = useRef(100);
 
   useEffect(() => {
@@ -109,16 +111,23 @@ export default function Index() {
     "Можешь позвонить?", "Смотри что нашёл 🔥", "Всё сделано", "Когда будешь?", "Ок 👌"
   ];
 
-  const pushNotification = useCallback((contact: typeof contacts[0], text: string) => {
+  const pushNotification = useCallback((contact: typeof contacts[0], text: string, withTyping = false) => {
     const nid = ++notifIdRef.current;
-    setNotifications((prev) => [...prev.slice(-2), { id: nid, contactId: contact.id, name: contact.name, text, avatar: contact.avatar, color: contact.color }]);
-    playSound("receive");
-    setUnreadCounts((prev) => ({ ...prev, [contact.id]: (prev[contact.id] || 0) + 1 }));
-    setMessages((prev) => ({
-      ...prev,
-      [contact.id]: [...(prev[contact.id] || []), { id: nid, text, out: false, time: new Date().toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }) }],
-    }));
-    setTimeout(() => setNotifications((prev) => prev.filter((n) => n.id !== nid)), 4000);
+    const deliver = () => {
+      setNotifications((prev) => [...prev.slice(-2), { id: nid, contactId: contact.id, name: contact.name, text, avatar: contact.avatar, color: contact.color }]);
+      playSound("receive");
+      setUnreadCounts((prev) => ({ ...prev, [contact.id]: (prev[contact.id] || 0) + 1 }));
+      setMessages((prev) => ({
+        ...prev,
+        [contact.id]: [...(prev[contact.id] || []), { id: nid, text, out: false, time: new Date().toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }) }],
+      }));
+      setTimeout(() => setNotifications((prev) => prev.filter((n) => n.id !== nid)), 4000);
+    };
+    if (withTyping) {
+      setTimeout(deliver, 2000 + Math.random() * 1500);
+    } else {
+      deliver();
+    }
   }, []);
 
   useEffect(() => {
@@ -132,6 +141,23 @@ export default function Index() {
     return () => { if (notifTimerRef.current) clearInterval(notifTimerRef.current); };
   }, [activeContact, pushNotification]);
 
+  // «Печатает...» — появляется при смене активного чата (если онлайн) и перед входящим сообщением
+  useEffect(() => {
+    if (activeContact.status === "offline") { setIsTyping(false); return; }
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    const delay = 1500 + Math.random() * 2000;
+    setIsTyping(true);
+    typingTimerRef.current = setTimeout(() => setIsTyping(false), delay);
+    return () => { if (typingTimerRef.current) clearTimeout(typingTimerRef.current); };
+  }, [activeContact]);
+
+  const triggerTyping = useCallback(() => {
+    if (activeContact.status === "offline") return;
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    setIsTyping(true);
+    typingTimerRef.current = setTimeout(() => setIsTyping(false), 2500 + Math.random() * 1500);
+  }, [activeContact]);
+
   const formatDuration = (s: number) => {
     const m = Math.floor(s / 60).toString().padStart(2, "0");
     const sec = (s % 60).toString().padStart(2, "0");
@@ -144,6 +170,8 @@ export default function Index() {
     setMessages((prev) => ({ ...prev, [activeContact.id]: [...(prev[activeContact.id] || []), newMsg] }));
     setInputText("");
     playSound("send");
+    // активный контакт «отвечает» — показываем typing
+    triggerTyping();
   };
 
   const addReaction = (msgId: number, emoji: string) => {
@@ -286,7 +314,20 @@ export default function Index() {
             </div>
             <div className="flex-1 min-w-0">
               <div className="font-semibold text-white/95 text-sm leading-tight">{activeContact.name}</div>
-              <div className="text-xs text-white/40">{statusLabel[activeContact.status]}</div>
+              <div className="text-xs flex items-center gap-1">
+                {isTyping && activeContact.status !== "offline" ? (
+                  <>
+                    <span className="flex gap-[3px] items-center">
+                      <span className="w-1 h-1 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: "0ms" }} />
+                      <span className="w-1 h-1 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: "150ms" }} />
+                      <span className="w-1 h-1 rounded-full bg-violet-400 animate-bounce" style={{ animationDelay: "300ms" }} />
+                    </span>
+                    <span className="text-violet-400">печатает...</span>
+                  </>
+                ) : (
+                  <span className="text-white/40">{statusLabel[activeContact.status]}</span>
+                )}
+              </div>
             </div>
             <div className="flex items-center gap-1">
               <button
@@ -440,6 +481,19 @@ export default function Index() {
                     </div>
                   </div>
                 ))}
+                {/* Typing indicator bubble */}
+                {isTyping && activeContact.status !== "offline" && (
+                  <div className="flex justify-start items-end gap-2 animate-fade-in mt-1">
+                    <div className={`w-6 h-6 rounded-full bg-gradient-to-br ${activeContact.color} flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0`}>
+                      {activeContact.avatar[0]}
+                    </div>
+                    <div className="msg-bubble-in px-4 py-3 flex gap-1.5 items-center">
+                      <span className="w-1.5 h-1.5 rounded-full bg-white/50 animate-bounce" style={{ animationDelay: "0ms" }} />
+                      <span className="w-1.5 h-1.5 rounded-full bg-white/50 animate-bounce" style={{ animationDelay: "160ms" }} />
+                      <span className="w-1.5 h-1.5 rounded-full bg-white/50 animate-bounce" style={{ animationDelay: "320ms" }} />
+                    </div>
+                  </div>
+                )}
                 <div ref={messagesEndRef} />
               </div>
 
